@@ -23,6 +23,8 @@ export default function ClassesPage() {
   const [editingClass, setEditingClass] = useState<Class | null>(null)
   const [viewingClass, setViewingClass] = useState<Class | null>(null)
   const [deletingClass, setDeletingClass] = useState<Class | null>(null)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
   const queryClient = useQueryClient()
 
   // Debounce search term to avoid too many API calls
@@ -33,30 +35,35 @@ export default function ClassesPage() {
   const isAdmin = user?.isAdmin || false
 
   const { data: classesData, isLoading } = useQuery({
-    queryKey: ["classes", debouncedSearchTerm],
-    queryFn: () => classesAPI.getAll(1, 10, debouncedSearchTerm),
+    queryKey: ["classes", debouncedSearchTerm, currentPage, pageSize],
+    queryFn: () => classesAPI.getAll(currentPage, pageSize, debouncedSearchTerm),
   })
 
   const deleteMutation = useMutation({
     mutationFn: classesAPI.delete,
-    onMutate: async (classId: string) => {
+    onMutate: async (classId: number) => {
       // Cancel any outgoing refetches to avoid overwriting optimistic update
-      await queryClient.cancelQueries({ queryKey: ["classes", debouncedSearchTerm] })
+      await queryClient.cancelQueries({ queryKey: ["classes", debouncedSearchTerm, currentPage, pageSize] })
 
       // Snapshot the previous value
       const previousClasses = queryClient.getQueryData<{ classes: Class[] }>([
         "classes",
         debouncedSearchTerm,
+        currentPage,
+        pageSize,
       ])
 
       // Optimistically update the cache
-      queryClient.setQueryData(["classes", debouncedSearchTerm], (old: { classes: Class[] } | undefined) => {
-        if (!old) return { classes: [] }
-        return {
-          ...old,
-          classes: old.classes.filter((classItem) => classItem.m02_id !== classId),
+      queryClient.setQueryData(
+        ["classes", debouncedSearchTerm, currentPage, pageSize],
+        (old: { classes: Class[] } | undefined) => {
+          if (!old) return { classes: [] }
+          return {
+            ...old,
+            classes: old.classes.filter((classItem) => classItem.m02_id !== classId),
+          }
         }
-      })
+      )
 
       // Return context with previous value for rollback on error
       return { previousClasses }
@@ -64,28 +71,35 @@ export default function ClassesPage() {
     onSuccess: () => {
       // Invalidate queries to ensure fresh data
       queryClient.invalidateQueries({ queryKey: ["classes"] })
-      queryClient.invalidateQueries({ queryKey: ["classes", debouncedSearchTerm] })
+      queryClient.invalidateQueries({ queryKey: ["classes", debouncedSearchTerm, currentPage, pageSize] })
       toast.success("Class deleted successfully")
       setDeletingClass(null)
     },
     onError: (error: Error, _classId, context: any) => {
       // Rollback to previous state on error
-      queryClient.setQueryData(["classes", debouncedSearchTerm], context.previousClasses)
+      queryClient.setQueryData(["classes", debouncedSearchTerm, currentPage, pageSize], context.previousClasses)
       toast.error(error.message || "Failed to delete class")
       setDeletingClass(null)
     },
     onSettled: () => {
       // Ensure queries are refetched after mutation settles
-      queryClient.invalidateQueries({ queryKey: ["classes", debouncedSearchTerm] })
+      queryClient.invalidateQueries({ queryKey: ["classes", debouncedSearchTerm, currentPage, pageSize] })
     },
   })
-
-  const classes = classesData?.classes || []
 
   const handleDeleteConfirm = () => {
     if (deletingClass) {
       deleteMutation.mutate(deletingClass.m02_id)
     }
+  }
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page)
+  }
+
+  const handlePageSizeChange = (size: number) => {
+    setPageSize(size)
+    setCurrentPage(1) // Reset to first page when page size changes
   }
 
   const columns: ColumnDef<Class>[] = [
@@ -115,14 +129,18 @@ export default function ClassesPage() {
     {
       accessorKey: "m02_m03_students",
       header: "Students",
-      cell: ({ row }) => <Badge variant="outline" className="text-nowrap">{row.original.m02_m03_students.length} students</Badge>,
+      cell: ({ row }) => (
+        <Badge variant="outline" className="text-nowrap">
+          {row.original.m02_m03_students.length} students
+        </Badge>
+      ),
     },
     ...(isAdmin
       ? [
           {
-            id: "actions" as const,
+            id: "actions",
             header: "Actions",
-            cell: ({ row }: { row: any }) => {
+            cell: ({ row }) => {
               const classItem = row.original
               return (
                 <div className="flex items-center gap-2">
@@ -168,7 +186,7 @@ export default function ClassesPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="lg:text-3xl text-2xl font-bold tracking-tight">Classes</h1>
+          <h1 className="text-2xl font-bold tracking-tight lg:text-3xl">Classes</h1>
           <p className="text-muted-foreground">
             {isAdmin ? "Manage your class schedules and assignments" : "View class schedules and assignments"}
           </p>
@@ -180,7 +198,7 @@ export default function ClassesPage() {
               placeholder="Search classes..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-8 md:w-[300px] w-full"
+              className="pl-8 w-full md:w-[300px]"
             />
           </div>
           {isAdmin && (
@@ -194,7 +212,7 @@ export default function ClassesPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>All Classes ({classes.length})</CardTitle>
+          <CardTitle>All Classes ({classesData?.pagination.total || 0})</CardTitle>
           <CardDescription>
             {isAdmin ? "A list of all classes in your school" : "View all classes in your school"}
           </CardDescription>
@@ -202,9 +220,14 @@ export default function ClassesPage() {
         <CardContent>
           <DataTable
             columns={columns}
-            data={classes}
+            data={classesData?.classes || []}
             loading={isLoading}
             onRowClick={(classItem) => setViewingClass(classItem)}
+            currentPage={currentPage}
+            pageSize={pageSize}
+            totalPages={classesData?.pagination.totalPages || 1}
+            onPageChange={handlePageChange}
+            onPageSizeChange={handlePageSizeChange}
           />
         </CardContent>
       </Card>
@@ -212,7 +235,6 @@ export default function ClassesPage() {
       {isAdmin && (
         <>
           <ClassModal open={isAddModalOpen} onOpenChange={setIsAddModalOpen} classItem={null} />
-
           <ClassModal
             open={!!editingClass}
             onOpenChange={(open) => !open && setEditingClass(null)}

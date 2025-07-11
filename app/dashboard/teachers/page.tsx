@@ -24,6 +24,8 @@ export default function TeachersPage() {
   const [editingTeacher, setEditingTeacher] = useState<Teacher | null>(null)
   const [viewingTeacher, setViewingTeacher] = useState<Teacher | null>(null)
   const [deletingTeacher, setDeletingTeacher] = useState<Teacher | null>(null)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
   const queryClient = useQueryClient()
 
   // Debounce search term to avoid too many API calls
@@ -34,30 +36,35 @@ export default function TeachersPage() {
   const isAdmin = user?.isAdmin || false
 
   const { data: teachersData, isLoading } = useQuery({
-    queryKey: ["teachers", debouncedSearchTerm],
-    queryFn: () => teachersAPI.getAll(1, 10, debouncedSearchTerm),
+    queryKey: ["teachers", debouncedSearchTerm, currentPage, pageSize],
+    queryFn: () => teachersAPI.getAll(currentPage, pageSize, debouncedSearchTerm),
   })
 
   const deleteMutation = useMutation({
     mutationFn: teachersAPI.delete,
-    onMutate: async (teacherId: string) => {
+    onMutate: async (teacherId: number) => {
       // Cancel any outgoing refetches to avoid overwriting optimistic update
-      await queryClient.cancelQueries({ queryKey: ["teachers", debouncedSearchTerm] })
+      await queryClient.cancelQueries({ queryKey: ["teachers", debouncedSearchTerm, currentPage, pageSize] })
 
       // Snapshot the previous value
       const previousTeachers = queryClient.getQueryData<{ teachers: Teacher[] }>([
         "teachers",
         debouncedSearchTerm,
+        currentPage,
+        pageSize,
       ])
 
       // Optimistically update the cache
-      queryClient.setQueryData(["teachers", debouncedSearchTerm], (old: { teachers: Teacher[] } | undefined) => {
-        if (!old) return { teachers: [] }
-        return {
-          ...old,
-          teachers: old.teachers.filter((teacher) => teacher.m01_id !== teacherId),
+      queryClient.setQueryData(
+        ["teachers", debouncedSearchTerm, currentPage, pageSize],
+        (old: { teachers: Teacher[] } | undefined) => {
+          if (!old) return { teachers: [] }
+          return {
+            ...old,
+            teachers: old.teachers.filter((teacher) => teacher.m01_id !== teacherId),
+          }
         }
-      })
+      )
 
       // Return context with previous value for rollback on error
       return { previousTeachers }
@@ -65,28 +72,35 @@ export default function TeachersPage() {
     onSuccess: () => {
       // Invalidate queries to ensure fresh data
       queryClient.invalidateQueries({ queryKey: ["teachers"] })
-      queryClient.invalidateQueries({ queryKey: ["teachers", debouncedSearchTerm] })
+      queryClient.invalidateQueries({ queryKey: ["teachers", debouncedSearchTerm, currentPage, pageSize] })
       toast.success("Teacher deleted successfully")
       setDeletingTeacher(null)
     },
     onError: (error: Error, _teacherId, context: any) => {
       // Rollback to previous state on error
-      queryClient.setQueryData(["teachers", debouncedSearchTerm], context.previousTeachers)
+      queryClient.setQueryData(["teachers", debouncedSearchTerm, currentPage, pageSize], context.previousTeachers)
       toast.error(error.message || "Failed to delete teacher")
       setDeletingTeacher(null)
     },
     onSettled: () => {
       // Ensure queries are refetched after mutation settles
-      queryClient.invalidateQueries({ queryKey: ["teachers", debouncedSearchTerm] })
+      queryClient.invalidateQueries({ queryKey: ["teachers", debouncedSearchTerm, currentPage, pageSize] })
     },
   })
-
-  const teachers = teachersData?.teachers || []
 
   const handleDeleteConfirm = () => {
     if (deletingTeacher) {
       deleteMutation.mutate(deletingTeacher.m01_id)
     }
+  }
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page)
+  }
+
+  const handlePageSizeChange = (size: number) => {
+    setPageSize(size)
+    setCurrentPage(1) // Reset to first page when page size changes
   }
 
   const columns: ColumnDef<Teacher>[] = [
@@ -133,9 +147,9 @@ export default function TeachersPage() {
     ...(isAdmin
       ? [
           {
-            id: "actions" as const,
+            id: "actions",
             header: "Actions",
-            cell: ({ row }: { row: any }) => {
+            cell: ({ row }) => {
               const teacher = row.original
               return (
                 <div className="flex items-center gap-2">
@@ -181,17 +195,17 @@ export default function TeachersPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="lg:text-3xl text-2xl font-bold tracking-tight">Teachers</h1>
+          <h1 className="text-2xl font-bold tracking-tight lg:text-3xl">Teachers</h1>
           <p className="text-muted-foreground">{isAdmin ? "Manage your teaching staff" : "View teaching staff"}</p>
         </div>
-        <div className="flex items-center flex-wrap-reverse gap-2 justify-start">
+        <div className="flex items-center gap-2 flex-wrap-reverse">
           <div className="relative w-full md:w-auto">
             <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Search teachers..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-8 md:w-[300px] w-full"
+              className="pl-8 w-full md:w-[300px]"
             />
           </div>
           {isAdmin && (
@@ -205,7 +219,7 @@ export default function TeachersPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>All Teachers ({teachers.length})</CardTitle>
+          <CardTitle>All Teachers ({teachersData?.pagination.total || 0})</CardTitle>
           <CardDescription>
             {isAdmin ? "A list of all teachers in your school" : "View all teachers in your school"}
           </CardDescription>
@@ -213,9 +227,14 @@ export default function TeachersPage() {
         <CardContent>
           <DataTable
             columns={columns}
-            data={teachers}
+            data={teachersData?.teachers || []}
             loading={isLoading}
             onRowClick={(teacher) => setViewingTeacher(teacher)}
+            currentPage={currentPage}
+            pageSize={pageSize}
+            totalPages={teachersData?.pagination.totalPages || 1}
+            onPageChange={handlePageChange}
+            onPageSizeChange={handlePageSizeChange}
           />
         </CardContent>
       </Card>

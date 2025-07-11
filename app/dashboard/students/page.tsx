@@ -24,6 +24,8 @@ export default function StudentsPage() {
   const [editingStudent, setEditingStudent] = useState<Student | null>(null)
   const [viewingStudent, setViewingStudent] = useState<Student | null>(null)
   const [deletingStudent, setDeletingStudent] = useState<Student | null>(null)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
   const queryClient = useQueryClient()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -32,56 +34,72 @@ export default function StudentsPage() {
   const isAdmin = user?.isAdmin || false
 
   const { data: studentsData, isLoading } = useQuery({
-    queryKey: ["students", debouncedSearchTerm],
-    queryFn: () => studentsAPI.getAll(1, 10, debouncedSearchTerm),
+    queryKey: ["students", debouncedSearchTerm, currentPage, pageSize],
+    queryFn: () => studentsAPI.getAll(currentPage, pageSize, debouncedSearchTerm),
   })
 
   const deleteMutation = useMutation({
     mutationFn: studentsAPI.delete,
     onMutate: async (studentId: number) => {
-      await queryClient.cancelQueries({ queryKey: ["students", debouncedSearchTerm] })
+      await queryClient.cancelQueries({ queryKey: ["students", debouncedSearchTerm, currentPage, pageSize] })
       const previousStudents = queryClient.getQueryData<{ students: Student[] }>([
         "students",
         debouncedSearchTerm,
+        currentPage,
+        pageSize,
       ])
-      queryClient.setQueryData(["students", debouncedSearchTerm], (old: { students: Student[] } | undefined) => {
-        if (!old) return { students: [] }
-        return {
-          ...old,
-          students: old.students.filter((student) => student.m03_id !== studentId),
+      queryClient.setQueryData(
+        ["students", debouncedSearchTerm, currentPage, pageSize],
+        (old: { students: Student[] } | undefined) => {
+          if (!old) return { students: [] }
+          return {
+            ...old,
+            students: old.students.filter((student) => student.m03_id !== studentId),
+          }
         }
-      })
+      )
       return { previousStudents }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["students"] })
-      queryClient.invalidateQueries({ queryKey: ["students", debouncedSearchTerm] })
+      queryClient.invalidateQueries({ queryKey: ["students", debouncedSearchTerm, currentPage, pageSize] })
       toast.success("Student deleted successfully")
       setDeletingStudent(null)
     },
     onError: (error: Error, _studentId, context: any) => {
-      queryClient.setQueryData(["students", debouncedSearchTerm], context.previousStudents)
+      queryClient.setQueryData(["students", debouncedSearchTerm, currentPage, pageSize], context.previousStudents)
       toast.error(error.message || "Failed to delete student")
       setDeletingStudent(null)
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ["students", debouncedSearchTerm] })
+      queryClient.invalidateQueries({ queryKey: ["students", debouncedSearchTerm, currentPage, pageSize] })
     },
   })
 
   const exportMutation = useMutation({
     mutationFn: studentsAPI.export,
-    onSuccess: () => {
+    onMutate: () => {
+      const toastId = toast.loading("Exporting students...")
+      return { toastId }
+    },
+    onSuccess: (_data, _variables, context) => {
+      toast.dismiss(context.toastId)
       toast.success("Students exported successfully")
     },
-    onError: (error: Error) => {
+    onError: (error: Error, _variables, context) => {
+      toast.dismiss(context.toastId)
       toast.error(error.message || "Failed to export students")
     },
   })
 
   const importMutation = useMutation({
     mutationFn: studentsAPI.import,
-    onSuccess: (data) => {
+    onMutate: (file: File) => {
+      const toastId = toast.loading(`Importing ${file.name}...`)
+      return { toastId }
+    },
+    onSuccess: (data, _variables, context) => {
+      toast.dismiss(context.toastId)
       queryClient.invalidateQueries({ queryKey: ["students"] })
       toast.success(`Imported ${data.data.createdCount} students successfully`)
       if (data.data.errors) {
@@ -91,7 +109,8 @@ export default function StudentsPage() {
         fileInputRef.current.value = ""
       }
     },
-    onError: (error: Error) => {
+    onError: (error: Error, _variables, context) => {
+      toast.dismiss(context.toastId)
       toast.error(error.message || "Failed to import students")
       if (fileInputRef.current) {
         fileInputRef.current.value = ""
@@ -110,6 +129,15 @@ export default function StudentsPage() {
     if (deletingStudent) {
       deleteMutation.mutate(deletingStudent.m03_id)
     }
+  }
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page)
+  }
+
+  const handlePageSizeChange = (size: number) => {
+    setPageSize(size)
+    setCurrentPage(1) // Reset to first page when page size changes
   }
 
   const columns: ColumnDef<Student>[] = [
@@ -215,7 +243,7 @@ export default function StudentsPage() {
               placeholder="Search students..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-8 w-full md:w-[300px]"
+              className="pl-8 w-full md:w-[250px]"
             />
           </div>
           {isAdmin && (
@@ -224,7 +252,7 @@ export default function StudentsPage() {
                 <Plus className="mr-2 h-4 w-4" />
                 Add Student
               </Button>
-              <Button onClick={() => fileInputRef.current?.click()}>
+              <Button onClick={() => fileInputRef.current?.click()} disabled={importMutation.isPending}>
                 <Upload className="mr-2 h-4 w-4" />
                 Import Excel
               </Button>
@@ -246,7 +274,7 @@ export default function StudentsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>All Students ({studentsData?.students.length || 0})</CardTitle>
+          <CardTitle>All Students ({studentsData?.pagination.total || 0})</CardTitle>
           <CardDescription>
             {isAdmin ? "A list of all students in your school" : "View all students in your school"}
           </CardDescription>
@@ -257,6 +285,11 @@ export default function StudentsPage() {
             data={studentsData?.students || []}
             loading={isLoading}
             onRowClick={(student) => setViewingStudent(student)}
+            currentPage={currentPage}
+            pageSize={pageSize}
+            totalPages={studentsData?.pagination.totalPages || 1}
+            onPageChange={handlePageChange}
+            onPageSizeChange={handlePageSizeChange}
           />
         </CardContent>
       </Card>
