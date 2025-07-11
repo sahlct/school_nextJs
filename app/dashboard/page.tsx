@@ -4,7 +4,6 @@ import { useQuery } from "@tanstack/react-query"
 import { teachersAPI, studentsAPI, classesAPI } from "@/lib/api"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Users, GraduationCap, BookOpen, TrendingUp } from "lucide-react"
-import { BarChart, Bar, XAxis, ResponsiveContainer, Cell } from "recharts"
 
 export default function DashboardPage() {
   const { data: teachersData } = useQuery({
@@ -76,6 +75,7 @@ export default function DashboardPage() {
   }
 
   const classData = getClassData()
+  const maxStudents = Math.max(...classData.map(d => d.students), 1)
 
   return (
     <div className="space-y-4">
@@ -216,7 +216,7 @@ export default function DashboardPage() {
           </div>
         </Card>
 
-        {/* Students per Class */}
+        {/* Students per Class - Custom Bar Chart */}
         <Card className="rounded-2xl bg-white shadow-lg p-5 flex flex-col gap-4 h-full">
           <div className="flex justify-between items-center">
             <div>
@@ -225,17 +225,40 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <div className="w-full h-40 flex items-end border-t border-dashed border-blue-400 flex-1">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={classData}>
-                <XAxis dataKey="name" tick={{ fill: "#999", fontSize: 10 }} tickLine={false} axisLine={false} />
-                <Bar dataKey="students" radius={[6, 6, 0, 0]}>
-                  {classData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.students > 0 ? "#4F46E5" : "#E5E7EB"} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+          <div className="flex-1 flex flex-col justify-end">
+            <div className="flex items-end justify-between h-48 gap-4 border-b border-dashed border-blue-400 pb-4">
+              {classData.map((classItem, index) => {
+                const barHeight = maxStudents > 0 ? (classItem.students / maxStudents) * 100 : 0
+                return (
+                  <div key={index} className="flex-1 flex flex-col items-center gap-2">
+                    <div className="relative w-full flex flex-col items-center justify-end h-40">
+                      <div className="text-xs font-medium text-gray-600 mb-1">
+                        {classItem.students > 0 ? classItem.students : ''}
+                      </div>
+                      <div
+                        className={`w-full max-w-12 rounded-t-lg transition-all duration-300 ${
+                          classItem.students > 0 ? 'bg-indigo-600' : 'bg-gray-200'
+                        }`}
+                        style={{
+                          height: `${Math.max(barHeight, classItem.students > 0 ? 8 : 4)}%`,
+                          minHeight: classItem.students > 0 ? '8px' : '4px'
+                        }}
+                      />
+                    </div>
+                    <div className="text-xs text-gray-500 text-center max-w-16 truncate">
+                      {classItem.name}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            
+            {/* Y-axis labels */}
+            <div className="flex justify-between items-center mt-2 text-xs text-gray-400">
+              <span>0</span>
+              <span>{Math.ceil(maxStudents / 2)}</span>
+              <span>{maxStudents}</span>
+            </div>
           </div>
         </Card>
       </div>
