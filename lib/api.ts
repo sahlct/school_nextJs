@@ -166,12 +166,10 @@ const apiRequest = async (endpoint: string, options: RequestInit = {}) => {
     token: token ? `${token.substring(0, 20)}...` : "No token"
   })
 
-  // Ensure headers object exists
   const headers = {
     ...(options.headers || {}),
   }
 
-  // Add Authorization header if token exists
   if (token) {
     headers.Authorization = `Bearer ${token}`
     console.log("Authorization header added:", headers.Authorization.substring(0, 20) + "...")
@@ -201,7 +199,6 @@ const apiRequest = async (endpoint: string, options: RequestInit = {}) => {
       throw new Error(errorData.message || `HTTP error! status: ${response.status}`)
     }
 
-    // For export endpoint, return blob directly
     if (endpoint === "/students/export") {
       return response.blob()
     }

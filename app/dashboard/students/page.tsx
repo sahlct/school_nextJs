@@ -38,7 +38,7 @@ export default function StudentsPage() {
 
   const deleteMutation = useMutation({
     mutationFn: studentsAPI.delete,
-    onMutate: async (studentId: string) => {
+    onMutate: async (studentId: number) => {
       await queryClient.cancelQueries({ queryKey: ["students", debouncedSearchTerm] })
       const previousStudents = queryClient.getQueryData<{ students: Student[] }>([
         "students",
@@ -106,8 +106,6 @@ export default function StudentsPage() {
     }
   }
 
-  const students = studentsData?.students || []
-
   const handleDeleteConfirm = () => {
     if (deletingStudent) {
       deleteMutation.mutate(deletingStudent.m03_id)
@@ -159,12 +157,12 @@ export default function StudentsPage() {
     ...(isAdmin
       ? [
           {
-            id: "actions" as const,
+            id: "actions",
             header: "Actions",
-            cell: ({ row }: { row: any }) => {
+            cell: ({ row }) => {
               const student = row.original
               return (
-                <div className="flex items-center">
+                <div className="flex items-center gap-2">
                   <Button
                     variant="ghost"
                     size="icon"
@@ -207,7 +205,7 @@ export default function StudentsPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="lg:text-3xl text-2xl font-bold tracking-tight">Students</h1>
+          <h1 className="text-2xl font-bold tracking-tight lg:text-3xl">Students</h1>
           <p className="text-muted-foreground">{isAdmin ? "Manage your student records" : "View student records"}</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap-reverse">
@@ -217,7 +215,7 @@ export default function StudentsPage() {
               placeholder="Search students..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-8 md:w-[300px] w-full"
+              className="pl-8 w-full md:w-[300px]"
             />
           </div>
           {isAdmin && (
@@ -248,7 +246,7 @@ export default function StudentsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>All Students ({students.length})</CardTitle>
+          <CardTitle>All Students ({studentsData?.students.length || 0})</CardTitle>
           <CardDescription>
             {isAdmin ? "A list of all students in your school" : "View all students in your school"}
           </CardDescription>
@@ -256,7 +254,7 @@ export default function StudentsPage() {
         <CardContent>
           <DataTable
             columns={columns}
-            data={students}
+            data={studentsData?.students || []}
             loading={isLoading}
             onRowClick={(student) => setViewingStudent(student)}
           />
