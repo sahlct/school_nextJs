@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useRef } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { studentsAPI, type Student } from "@/lib/api"
 import { useAppSelector } from "@/lib/hooks"
@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Plus, Search, Edit, Trash2, Eye } from "lucide-react"
+import { Plus, Search, Edit, Trash2, Eye, Download, Upload } from "lucide-react"
 import { StudentModal } from "@/components/students/student-modal"
 import { StudentDetailModal } from "@/components/students/student-detail-modal"
 import { ConfirmationModal } from "@/components/ui/confirmation-modal"
@@ -25,11 +25,9 @@ export default function StudentsPage() {
   const [viewingStudent, setViewingStudent] = useState<Student | null>(null)
   const [deletingStudent, setDeletingStudent] = useState<Student | null>(null)
   const queryClient = useQueryClient()
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Debounce search term to avoid too many API calls
   const debouncedSearchTerm = useDebounce(searchTerm, 500)
-
-  // Get current user to check admin status
   const { user } = useAppSelector((state) => state.auth)
   const isAdmin = user?.isAdmin || false
 
@@ -41,16 +39,11 @@ export default function StudentsPage() {
   const deleteMutation = useMutation({
     mutationFn: studentsAPI.delete,
     onMutate: async (studentId: string) => {
-      // Cancel any outgoing refetches to avoid overwriting optimistic update
       await queryClient.cancelQueries({ queryKey: ["students", debouncedSearchTerm] })
-
-      // Snapshot the previous value
       const previousStudents = queryClient.getQueryData<{ students: Student[] }>([
         "students",
         debouncedSearchTerm,
       ])
-
-      // Optimistically update the cache
       queryClient.setQueryData(["students", debouncedSearchTerm], (old: { students: Student[] } | undefined) => {
         if (!old) return { students: [] }
         return {
@@ -58,28 +51,60 @@ export default function StudentsPage() {
           students: old.students.filter((student) => student.m03_id !== studentId),
         }
       })
-
-      // Return context with previous value for rollback on error
       return { previousStudents }
     },
     onSuccess: () => {
-      // Invalidate queries to ensure fresh data
       queryClient.invalidateQueries({ queryKey: ["students"] })
       queryClient.invalidateQueries({ queryKey: ["students", debouncedSearchTerm] })
       toast.success("Student deleted successfully")
       setDeletingStudent(null)
     },
     onError: (error: Error, _studentId, context: any) => {
-      // Rollback to previous state on error
       queryClient.setQueryData(["students", debouncedSearchTerm], context.previousStudents)
       toast.error(error.message || "Failed to delete student")
       setDeletingStudent(null)
     },
     onSettled: () => {
-      // Ensure queries are refetched after mutation settles
       queryClient.invalidateQueries({ queryKey: ["students", debouncedSearchTerm] })
     },
   })
+
+  const exportMutation = useMutation({
+    mutationFn: studentsAPI.export,
+    onSuccess: () => {
+      toast.success("Students exported successfully")
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || "Failed to export students")
+    },
+  })
+
+  const importMutation = useMutation({
+    mutationFn: studentsAPI.import,
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["students"] })
+      toast.success(`Imported ${data.data.createdCount} students successfully`)
+      if (data.data.errors) {
+        data.data.errors.forEach((error: string) => toast.error(error))
+      }
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ""
+      }
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || "Failed to import students")
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ""
+      }
+    },
+  })
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (file) {
+      importMutation.mutate(file)
+    }
+  }
 
   const students = studentsData?.students || []
 
@@ -139,7 +164,7 @@ export default function StudentsPage() {
             cell: ({ row }: { row: any }) => {
               const student = row.original
               return (
-                <div className="flex items ations-column">
+                <div className="flex items-center">
                   <Button
                     variant="ghost"
                     size="icon"
@@ -196,10 +221,27 @@ export default function StudentsPage() {
             />
           </div>
           {isAdmin && (
-            <Button onClick={() => setIsAddModalOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              Add Student
-            </Button>
+            <>
+              <Button onClick={() => setIsAddModalOpen(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add Student
+              </Button>
+              <Button onClick={() => fileInputRef.current?.click()}>
+                <Upload className="mr-2 h-4 w-4" />
+                Import Excel
+              </Button>
+              <input
+                type="file"
+                ref={fileInputRef}
+                className="hidden"
+                accept=".xlsx,.xls"
+                onChange={handleFileChange}
+              />
+              <Button onClick={() => exportMutation.mutate()} disabled={exportMutation.isPending}>
+                <Download className="mr-2 h-4 w-4" />
+                Export Excel
+              </Button>
+            </>
           )}
         </div>
       </div>
@@ -224,7 +266,6 @@ export default function StudentsPage() {
       {isAdmin && (
         <>
           <StudentModal open={isAddModalOpen} onOpenChange={setIsAddModalOpen} student={null} />
-
           <StudentModal
             open={!!editingStudent}
             onOpenChange={(open) => !open && setEditingStudent(null)}

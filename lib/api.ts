@@ -201,6 +201,11 @@ const apiRequest = async (endpoint: string, options: RequestInit = {}) => {
       throw new Error(errorData.message || `HTTP error! status: ${response.status}`)
     }
 
+    // For export endpoint, return blob directly
+    if (endpoint === "/students/export") {
+      return response.blob()
+    }
+
     return response.json()
   } catch (error) {
     console.error("API Request failed:", error)
@@ -339,7 +344,7 @@ export const teachersAPI = {
   },
 }
 
-// Classes API (with Bearer token) - ENHANCED WITH DEBUGGING
+// Classes API (with Bearer token)
 export const classesAPI = {
   getAll: async (page = 1, limit = 10, search = ""): Promise<ClassesResponse["data"]> => {
     const searchParam = search ? `&search=${encodeURIComponent(search)}` : ""
@@ -479,6 +484,33 @@ export const studentsAPI = {
     if (response.status !== "Success") {
       throw new Error(response.message || "Failed to delete student")
     }
+  },
+
+  export: async (): Promise<void> => {
+    const blob = await apiRequest("/students/export")
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = "students_export.xlsx"
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    window.URL.revokeObjectURL(url)
+  },
+
+  import: async (file: File): Promise<{ data: { createdCount: number; errors?: string[] } }> => {
+    const formData = new FormData()
+    formData.append("file", file)
+    const response = await apiRequest("/students/import", {
+      method: "POST",
+      body: formData,
+    })
+
+    if (response.status === "Success") {
+      return response
+    }
+
+    throw new Error(response.message || "Failed to import students")
   },
 }
 
